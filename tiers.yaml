@@ -1,0 +1,75 @@
+# tiers.yaml — TickFlow 档位能力声明（本地兜底版）
+# 说明：原仓库此文件由 CI 构建时生成，这里依据 backend/app/tickflow/capabilities.py
+# 的 Cap 枚举手工重建最小可用版本，使「无 Key 的免费模式」可正常启动并拉取历史日 K。
+# 结构: { 档位: { 能力名: {rpm, batch, subscribe} } }，limit 仅用于 UI 显示与本地限速，
+# 真实上限由 TickFlow 服务端控制。付费档位在有 Key 时由探针结果覆盖。
+
+none:
+  kline.daily.by_symbol:
+    rpm: 200
+    batch: 100
+  kline.daily.batch:
+    rpm: 200
+    batch: 100
+  adj_factor:
+    rpm: 200
+    batch: 100
+  quote.by_symbol:
+    rpm: 60
+    batch: 1
+
+free:
+  kline.daily.by_symbol:
+    rpm: 200
+    batch: 100
+  kline.daily.batch:
+    rpm: 200
+    batch: 100
+  adj_factor:
+    rpm: 200
+    batch: 100
+  quote.by_symbol:
+    rpm: 60
+    batch: 1
+  quote.batch:
+    rpm: 10
+    batch: 5
+
+starter:
+  kline.daily.by_symbol: {rpm: 200, batch: 100}
+  kline.daily.batch: {rpm: 200, batch: 100}
+  adj_factor: {rpm: 200, batch: 100}
+  quote.by_symbol: {rpm: 60, batch: 1}
+  quote.batch: {rpm: 60, batch: 100}
+  quote.pool: {rpm: 10, batch: 100}
+
+pro:
+  kline.daily.by_symbol: {rpm: 200, batch: 100}
+  kline.daily.batch: {rpm: 200, batch: 100}
+  kline.minute.by_symbol: {rpm: 200, batch: 1}
+  kline.minute.batch: {rpm: 200, batch: 100}
+  adj_factor: {rpm: 200, batch: 100}
+  quote.by_symbol: {rpm: 60, batch: 1}
+  quote.batch: {rpm: 60, batch: 100}
+  quote.pool: {rpm: 10, batch: 100}
+  intraday: {rpm: 60}
+  intraday.batch: {rpm: 10, batch: 100}
+  depth5: {rpm: 60, batch: 1}
+  depth5.batch: {rpm: 30, batch: 100}
+
+expert:
+  kline.daily.by_symbol: {rpm: 200, batch: 100}
+  kline.daily.batch: {rpm: 200, batch: 100}
+  kline.minute.by_symbol: {rpm: 200, batch: 1}
+  kline.minute.batch: {rpm: 200, batch: 100}
+  adj_factor: {rpm: 200, batch: 100}
+  quote.by_symbol: {rpm: 60, batch: 1}
+  quote.batch: {rpm: 60, batch: 100}
+  quote.pool: {rpm: 10, batch: 100}
+  intraday: {rpm: 60}
+  intraday.batch: {rpm: 10, batch: 100}
+  intraday.universe: {rpm: 10}
+  depth5: {rpm: 60, batch: 1}
+  depth5.batch: {rpm: 30, batch: 100}
+  websocket: {subscribe: 100}
+  financial: {rpm: 60, batch: 100}

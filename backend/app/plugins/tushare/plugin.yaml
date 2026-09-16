@@ -1,0 +1,16 @@
+# Tushare — A 股数据插件 (https://tushare.pro)
+# Python 型插件 (runtime: python, 依赖见 requirements.txt, 设置页可一键安装)。
+# 需在 tushare.pro 注册获取 Token 后填入 (环境变量 TUSHARE_TOKEN / TS_TOKEN 或设置页输入框)。
+# 免费基础积分即可拉 日K / 复权因子 / 股票列表; 分钟K / 实时等进阶能力需更高积分。
+# 实时行情全市场轮询建议把 realtime_data_provider 设为 akshare (免费无需 token, 东方财富快照)。
+
+name: tushare
+display_name: "Tushare"
+runtime: python
+entry: app.plugins.tushare.provider:TushareProvider
+check: app.plugins.tushare.provider:availability
+datasets: [daily, adj_factor]
+api_key_env: TUSHARE_TOKEN   # 声明后设置页提供 Key 输入框 (先探后存, secrets.json 优先)
+description: "Tushare A 股数据。日K/复权因子/股票列表走免费积分(注册即送);分钟K/实时等进阶能力需更高积分。amount 单位千元已自动换算为元。实时行情建议留 akshare/tickflow。"
+install_hint: "点击卡片「安装」自动装 tushare; 然后在 Key 输入框填入 tushare.pro 注册获取的 Token (或配置环境变量 TUSHARE_TOKEN / TS_TOKEN)。免费积分可拉日K与复权因子。"
+homepage: "https://tushare.pro"

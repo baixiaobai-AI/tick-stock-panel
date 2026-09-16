@@ -1,0 +1,13 @@
+# AKShare — 免费 A 股数据源插件 (https://akshare.akfamily.xyz)
+# 无需任何 API Key: 日K / 复权因子 / 全市场快照均来自东方财富公开接口。
+# runtime=python: 首次使用需在设置页点击安装(执行 uv pip install akshare, 依赖较大约 1~3 分钟)。
+
+name: akshare
+display_name: "AKShare"
+runtime: python
+entry: app.plugins.akshare.provider:AKShareProvider
+check: app.plugins.akshare.provider:_availability
+datasets: [daily, adj_factor, realtime]
+description: "AKShare 免费数据源。日K/复权因子/全市场快照来自东方财富公开接口, 完全脱离 TickFlow。分钟K(freq=1)免费源不稳定, 未接入(自动回退 TickFlow); 指数/ETF 维表仍走免费 TickFlow exchanges。"
+install_hint: "点击安装按钮执行 `uv pip install akshare` (依赖较大, 需 1~3 分钟)"
+homepage: "https://akshare.akfamily.xyz"
