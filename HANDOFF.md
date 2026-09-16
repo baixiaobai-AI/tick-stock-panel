@@ -1,4 +1,4 @@
-# TSP 桌面版 — 续接说明（给 AI 助手看）
+﻿# TSP 桌面版 — 续接说明（给 AI 助手看）
 
 > 换电脑 / 换 AI 会话时，把本文档贴给 AI，或直接让它 clone 本仓库后读 `HANDOFF.md`，即可无缝续上。
 > 最后更新：2026-09-16
@@ -123,6 +123,14 @@ API 建的提交**同样会触发 push 事件和 Actions**。
    网络操作要用 `mingw64\bin\git.exe` 并设 `GIT_EXEC_PATH=mingw64\bin`（本地 init/add/commit 用哪个都行）。
 5. **PowerShell 工具的 stdout 不回显** —— 把结果写进文本文件再用 Read 工具读。
 6. 旧文档里"AI 无法代推、必须用户自己用 GitHub Desktop"的结论**已不成立**，见 3.2。
+7. **PowerShell 5.1 会把无 BOM 的 UTF-8 脚本当 GBK 读** —— 中文注释里的字节（如 `——`）在 GBK 解码下会吞掉紧邻的 `{` / `}`，
+   导致脚本**语法解析失败且几乎不留日志**（进程直接退出码 1）。
+   解决：`.ps1` 必须存成 **UTF-8 with BOM**。改动脚本后先校验：
+   ```powershell
+   $err=$null; $null=[System.Management.Automation.Language.Parser]::ParseFile("x.ps1",[ref]$null,[ref]$err); $err.Count
+   ```
+8. **HttpClient 的 `SendAsync(PATCH)` 在本沙盒会静默失败**（退出码 1、不落日志）。
+   所有 PATCH 请求改用 `Invoke-WebRequest -Method Patch`（已修进 `tools/gh_update.ps1`）。
 
 ---
 
