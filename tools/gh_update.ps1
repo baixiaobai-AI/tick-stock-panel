@@ -1,4 +1,4 @@
-param(
+﻿param(
   [Parameter(Mandatory=$true)][string]$Owner,
   [Parameter(Mandatory=$true)][string]$Repo,
   [Parameter(Mandatory=$true)][string]$Token,
@@ -81,15 +81,21 @@ function Get-Json([string]$url) {
   return @{ ok = $false; status = -1; body = "exhausted" }
 }
 
+# 注意: 用 Invoke-WebRequest 而不是 HttpClient.SendAsync(PATCH) ——
+# 后者在本沙盒会静默失败(进程退出码 1 但不落日志), 已踩过两次。
 function Patch-Json([string]$url, [string]$json) {
-  $content = New-Object System.Net.Http.StringContent($json, [System.Text.Encoding]::UTF8, "application/json")
-  $req = New-Object System.Net.Http.HttpRequestMessage
-  $req.Method = [System.Net.Http.HttpMethod]::Patch
-  $req.RequestUri = $url
-  $req.Content = $content
-  $resp = $client.SendAsync($req).Result
-  $body = $resp.Content.ReadAsStringAsync().Result
-  return @{ ok = ([int]$resp.StatusCode -lt 400); status = [int]$resp.StatusCode; body = $body }
+  try {
+    $h = @{ "Authorization" = "Bearer $Token"; "Accept" = "application/vnd.github+json"; "User-Agent" = "tsp-updater" }
+    $r = Invoke-WebRequest -Uri $url -Method Patch -Headers $h -Body ([System.Text.Encoding]::UTF8.GetBytes($json)) -ContentType "application/json; charset=utf-8" -TimeoutSec 60 -UseBasicParsing
+    return @{ ok = $true; status = [int]$r.StatusCode; body = $r.Content }
+  } catch {
+    $msg = $_.Exception.Message
+    if ($_.Exception.Response) {
+      $sr = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+      $msg = $msg + " :: " + $sr.ReadToEnd()
+    }
+    return @{ ok = $false; status = -1; body = $msg }
+  }
 }
 
 Log "===== sync start: $Owner/$Repo@$Branch ====="

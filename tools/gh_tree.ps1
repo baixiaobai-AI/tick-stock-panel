@@ -1,4 +1,4 @@
-param(
+﻿param(
   [Parameter(Mandatory=$true)][string]$Owner,
   [Parameter(Mandatory=$true)][string]$Repo,
   [Parameter(Mandatory=$true)][string]$Token,
