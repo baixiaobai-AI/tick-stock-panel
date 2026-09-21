@@ -106,6 +106,15 @@ function useEChart(
     // 惰性 init: 图表容器可能条件渲染晚于组件挂载 (如情绪周期图依赖异步查询结果,
     // 冷加载时首帧 rows 为空 → div 不在 DOM, 仅挂载时跑一次的 init 会扑空)。
     // 数据到达后 option 变化触发本 effect, 此时 div 已挂载 — 补建实例再 setOption。
+    //
+    // 另一个坑(切时间范围必现): rows 短暂为空时整块卡片被卸载, 数据回来后 React 重建
+    // 的是一个**全新 div**, 而实例仍绑在已脱离文档的旧节点上 → 继续 setOption 只会画进
+    // 那块看不见的旧画布, 新容器永远空白(表现: 图表区连坐标轴都没有)。下面这段"换人
+    // 检测"必须先跑, 否则图表只在首次进入页面时正常, 一切范围都画不出来。
+    if (instRef.current && (instRef.current.isDisposed() || instRef.current.getDom() !== ref.current)) {
+      if (!instRef.current.isDisposed()) instRef.current.dispose()
+      instRef.current = null
+    }
     if (!instRef.current) {
       instRef.current = echarts.init(ref.current, undefined, { renderer: 'canvas' })
       onReady?.(instRef.current)
@@ -172,33 +181,40 @@ export function Regime() {
     enabled: rangeReady,
     staleTime: 5 * 60 * 1000,
   })
+  // rows 提前到下方查询之前声明: 阶段段/主线排行的时间窗口取自 history 实际返回的
+  // 首尾交易日。(直接传 limit 会依赖后端参数版本 — 旧后端不认 limit 就静默返回全量;
+  // 且"最近 N 天"的窗口口径容易与上面的图表错位。用 rows 首尾日期既与图表逐日对齐,
+  // 也不挑后端版本。)
+  const rows: RegimeRow[] = history.data?.rows ?? []
+  const winStart = rows.length > 0 ? rows[0].date : undefined
+  const winEnd = rows.length > 0 ? rows[rows.length - 1].date : undefined
+
   const states = useQuery({
     queryKey: QK.regimeStates(days),
     queryFn: () => api.regimeStates(days),
     enabled: rangeReady,
     staleTime: 5 * 60 * 1000,
   })
-  // 情绪周期阶段段 + 主线排行(与 history 同一时间范围)
+  // 情绪周期阶段段 + 主线排行 (窗口 = 上面图表实际加载的区间)
   const phases = useQuery({
-    queryKey: QK.regimePhases(histRange.start, histRange.end, histRange.limit),
-    queryFn: () => api.regimePhases(histRange.start, histRange.end, histRange.limit),
-    enabled: rangeReady,
+    queryKey: QK.regimePhases(winStart, winEnd),
+    queryFn: () => api.regimePhases(winStart, winEnd),
+    enabled: rangeReady && !!winStart && !!winEnd,
     staleTime: 5 * 60 * 1000,
   })
   const [mainlineKind, setMainlineKind] = useState<'concept' | 'industry'>('concept')
   const [filterOpen, setFilterOpen] = useState(false)
   // 时间轴点击选中的交易日 (当日快照联动); null = 未选。窗口切换后失效。
   const [selDate, setSelDate] = useState<string | null>(null)
-  useEffect(() => { setSelDate(null) }, [histRange.start, histRange.end])
+  useEffect(() => { setSelDate(null) }, [winStart, winEnd])
   const mainline = useQuery({
-    queryKey: QK.regimeMainline(mainlineKind, histRange.start, histRange.end, histRange.limit),
-    queryFn: () => api.regimeMainline(histRange.start, histRange.end, 10, mainlineKind, histRange.limit),
-    enabled: rangeReady,
+    queryKey: QK.regimeMainline(mainlineKind, winStart, winEnd),
+    queryFn: () => api.regimeMainline(winStart, winEnd, 10, mainlineKind),
+    enabled: rangeReady && !!winStart && !!winEnd,
     staleTime: 5 * 60 * 1000,
   })
   const [recomputing, setRecomputing] = useState(false)
 
-  const rows: RegimeRow[] = history.data?.rows ?? []
   const latest = rows.length > 0 ? rows[rows.length - 1] : null
   const hasPhaseData = rows.length > 0 && rows.some(r => r.phase != null)
   const segments = phases.data?.segments ?? []

@@ -84,18 +84,21 @@ function Get-Json([string]$url) {
 # 注意: 用 Invoke-WebRequest 而不是 HttpClient.SendAsync(PATCH) ——
 # 后者在本沙盒会静默失败(进程退出码 1 但不落日志), 已踩过两次。
 function Patch-Json([string]$url, [string]$json) {
+  $h = @{ "Authorization" = "Bearer $Token"; "Accept" = "application/vnd.github+json"; "User-Agent" = "tsp-updater" }
+  $ok = $false
+  $st = -1
+  $bd = ""
   try {
-    $h = @{ "Authorization" = "Bearer $Token"; "Accept" = "application/vnd.github+json"; "User-Agent" = "tsp-updater" }
-    $r = Invoke-WebRequest -Uri $url -Method Patch -Headers $h -Body ([System.Text.Encoding]::UTF8.GetBytes($json)) -ContentType "application/json; charset=utf-8" -TimeoutSec 60 -UseBasicParsing
-    return @{ ok = $true; status = [int]$r.StatusCode; body = $r.Content }
+    $resp = Invoke-WebRequest -Uri $url -Method Patch -Headers $h -Body ([System.Text.Encoding]::UTF8.GetBytes($json)) -ContentType "application/json; charset=utf-8" -TimeoutSec 60 -UseBasicParsing
+    $ok = $true
+    $st = [int]$resp.StatusCode
+    $bd = $resp.Content
   } catch {
-    $msg = $_.Exception.Message
-    if ($_.Exception.Response) {
-      $sr = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-      $msg = $msg + " :: " + $sr.ReadToEnd()
-    }
-    return @{ ok = $false; status = -1; body = $msg }
+    $ok = $false
+    $st = -1
+    $bd = "PATCHERROR " + $Error[0].Exception.Message
   }
+  return @{ ok = $ok; status = $st; body = $bd }
 }
 
 Log "===== sync start: $Owner/$Repo@$Branch ====="
@@ -115,7 +118,19 @@ foreach ($n in $treeObj.tree) { if ($n.type -eq "blob") { $remote[$n.path] = $n.
 Log "remote blobs = $($remote.Count)"
 
 # ---------- 2. 本地文件 + SHA ----------
-$all = Get-ChildItem -Path $Root -Recurse -File -Force | Where-Object { $_.FullName -notmatch "\\\.git\\" }
+# 排除版本控制/构建产物/缓存目录: 它们既不该进仓库, 也会把上传量从个位数文件炸到
+# 几万个 (装一次 node_modules 就是 3 万+ 文件, SHA 计算和上传都要几小时)。
+# 规则对齐仓库 .gitignore 的前几节；被排除的远端残留文件会在重建树时自动消失。
+$ignoreRe = @(
+  '\\\.git\\', '\\node_modules\\', '\\dist\\', '\\build\\', '\\__pycache__\\',
+  '\\\.pytest_cache\\', '\\\.mypy_cache\\', '\\\.ruff_cache\\', '\\\.uv\\',
+  '\\\.venv\\', '\\venv\\', '\\\.pnpm-store\\', '\\\.vite\\',
+  '\.pyc$', '\.pyo$', '\.tsbuildinfo$'
+)
+$all = Get-ChildItem -Path $Root -Recurse -File -Force | Where-Object {
+  $full = $_.FullName
+  -not ($ignoreRe | Where-Object { $full -match $_ })
+}
 $items = New-Object System.Collections.Generic.List[object]
 foreach ($f in $all) {
   $rel = $f.FullName.Substring($Root.Length).TrimStart('\', '/').Replace('\', '/')
