@@ -85,49 +85,74 @@ function isPresetKey(p: RangePreset, k: '1y' | '2y' | 'all'): boolean {
 }
 
 // ── EChart hook ───────────────────────────────────────────
+/**
+ * ECharts 实例生命周期 + zr 级事件的统一管理。
+ *
+ * 两个必须一起遵守的约束(踩过两次, 都是切时间范围触发):
+ *
+ * 1) 容器换人: rows 空窗期整块卡片会被卸载, 数据回来后 React 重建的是一个**全新 div**,
+ *    而实例仍绑在已脱离文档的旧节点上 → 继续 setOption 只画进那块看不见的旧画布,
+ *    新容器永远空白(表现: 图表区连坐标轴都没有)。所以复用前必须比对 getDom()。
+ *
+ * 2) zr 事件不能在 dispose 之后再挂: `dispose()` 会把内部 `_zr` 置为 null(见 echarts
+ *    lib/core/echarts.js 的 "Set properties to null"), 此后 `getZr()` 返回 null,
+ *    `getZr().on(...)` 直接抛 `Cannot read properties of null (reading 'on')`。
+ *    而它抛在 useEffect 里 → 整个页面被 React 错误边界接管(白屏 "Unexpected
+ *    Application Error")。因此: 事件只在 init 的同一个瞬间挂, 回调放 ref 里每次渲染刷新,
+ *    绝不由外部 effect "拿到实例后再 getZr().on()"(那条路径必然踩中销毁窗口)。
+ */
 function useEChart(
   option: echarts.EChartsOption | null,
   deps: unknown[],
-  onReady?: (inst: echarts.ECharts) => void,
+  onZrClick?: (e: { offsetX: number; offsetY: number }, inst: echarts.ECharts) => void,
 ) {
   const ref = useRef<HTMLDivElement>(null)
   const instRef = useRef<echarts.ECharts | null>(null)
+  // 回调放 ref: 监听只在 init 时挂一次, 每次渲染刷新指针 → 回调里永远是最新的
+  // rows/setState, 又不必把 rows 写进 effect 依赖(否则数据一变就重建实例)。
+  const clickRef = useRef(onZrClick)
+  clickRef.current = onZrClick
   useEffect(() => {
     const onResize = () => instRef.current?.resize()
     window.addEventListener('resize', onResize)
     return () => {
       window.removeEventListener('resize', onResize)
-      instRef.current?.dispose()
+      const inst = instRef.current
       instRef.current = null
+      if (inst && !inst.isDisposed()) inst.dispose()
     }
   }, [])
   useEffect(() => {
-    if (!ref.current) return
-    // 惰性 init: 图表容器可能条件渲染晚于组件挂载 (如情绪周期图依赖异步查询结果,
-    // 冷加载时首帧 rows 为空 → div 不在 DOM, 仅挂载时跑一次的 init 会扑空)。
-    // 数据到达后 option 变化触发本 effect, 此时 div 已挂载 — 补建实例再 setOption。
-    //
-    // 另一个坑(切时间范围必现): rows 短暂为空时整块卡片被卸载, 数据回来后 React 重建
-    // 的是一个**全新 div**, 而实例仍绑在已脱离文档的旧节点上 → 继续 setOption 只会画进
-    // 那块看不见的旧画布, 新容器永远空白(表现: 图表区连坐标轴都没有)。下面这段"换人
-    // 检测"必须先跑, 否则图表只在首次进入页面时正常, 一切范围都画不出来。
-    if (instRef.current && (instRef.current.isDisposed() || instRef.current.getDom() !== ref.current)) {
-      if (!instRef.current.isDisposed()) instRef.current.dispose()
+    // ① 复用前体检: 已销毁 / 容器已不在文档中 / 绑的不是当前 DOM → 旧实例再也画不出来,
+    //    直接销毁(它的 zrender 还挂在脱离文档的旧节点上, 留着就是泄漏)。
+    const cur = instRef.current
+    if (cur && (cur.isDisposed() || !ref.current || cur.getDom() !== ref.current)) {
+      if (!cur.isDisposed()) cur.dispose()
       instRef.current = null
     }
-    if (!instRef.current) {
-      instRef.current = echarts.init(ref.current, undefined, { renderer: 'canvas' })
-      onReady?.(instRef.current)
+    if (!ref.current) return
+    // ② 惰性 init: 图表容器可能条件渲染晚于组件挂载(如情绪周期图依赖异步查询结果,
+    //    冷加载时首帧 rows 为空 → div 不在 DOM)。数据到达后 option 变化触发本 effect,
+    //    此时 div 已挂载 — 补建实例再 setOption。
+    let chart = instRef.current
+    if (!chart) {
+      const created: echarts.ECharts = echarts.init(ref.current, undefined, { renderer: 'canvas' })
+      instRef.current = created
+      // zr 点击: 命中区为整个网格 → 不依赖细线/窄柱的精确点击; 点击图例/dataZoom
+      // 不在网格内, 由回调里的 containPixel 自行忽略。必须在 created 存活期间挂。
+      const zr = created.getZr()
+      zr.on('click', (e: { offsetX: number; offsetY: number }) => clickRef.current?.(e, created))
+      chart = created
     }
     if (option) {
-      instRef.current.setOption(option, { notMerge: true })
+      chart.setOption(option, { notMerge: true })
       // 容器可能经历 display:none(tab 隐藏) → 可见的切换, 画布尺寸需要按当前
       // 容器实际尺寸重算; 调用方把 view 等显隐依赖传入 deps 以触发本 effect。
-      instRef.current.resize()
+      chart.resize()
     } else {
       // 数据空窗期(切换时间范围后新查询尚未返回 / 该范围无数据):
       // 不清空会残留上一范围的画布, 表现为"切了范围但图表没变"。
-      instRef.current.clear()
+      chart.clear()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [option, ...deps])
@@ -467,22 +492,15 @@ export function Regime() {
       ],
     }
   }, [rows, days, ct, hasPhaseData, selDate])
-  const [phaseChartInst, setPhaseChartInst] = useState<echarts.ECharts | null>(null)
-  const phaseChartRef = useEChart(phaseOption, [phaseOption, view], setPhaseChartInst)
-  // 点击图表任意位置 → 选中最近的交易日 (zrender 级监听, 命中区为整个网格,
-  // 不依赖细线/窄柱的精确点击); 点击图例/dataZoom 不在网格内, 自动忽略
-  useEffect(() => {
-    if (!phaseChartInst || !phaseOption) return
-    const zr = phaseChartInst.getZr()
-    const onClick = (e: { offsetX: number; offsetY: number }) => {
-      if (!phaseChartInst.containPixel('grid', [e.offsetX, e.offsetY])) return
-      const dates = rows.map(r => r.date)
-      const idx = Math.round(phaseChartInst.convertFromPixel({ seriesIndex: 0 }, [e.offsetX, e.offsetY])[0])
-      if (Number.isFinite(idx) && idx >= 0 && idx < dates.length) setSelDate(dates[idx])
-    }
-    zr.on('click', onClick)
-    return () => { zr.off('click', onClick) }
-  }, [phaseChartInst, phaseOption, rows])
+  // 点击图表任意位置 → 选中最近的交易日。
+  // 回调交给 useEChart 在实例创建时统一挂载(见 hook 注释 ②): 放在外部 effect 里
+  // 会因为"实例已被销毁、state 还是旧值"而在切时间范围时拿到 null zr 整页崩溃。
+  const phaseChartRef = useEChart(phaseOption, [phaseOption, view], (e, inst) => {
+    if (!inst.containPixel('grid', [e.offsetX, e.offsetY])) return
+    const dates = rows.map(r => r.date)
+    const idx = Math.round(inst.convertFromPixel({ seriesIndex: 0 }, [e.offsetX, e.offsetY])[0])
+    if (Number.isFinite(idx) && idx >= 0 && idx < dates.length) setSelDate(dates[idx])
+  })
 
   // 趋势图: 综合分主线 + 4 子维度曲线(可切换) + 状态背景色带 + 涨停数柱状
   const trendOption = useMemo<echarts.EChartsOption | null>(() => {
