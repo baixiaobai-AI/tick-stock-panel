@@ -115,6 +115,10 @@ function useEChart(
       // 容器可能经历 display:none(tab 隐藏) → 可见的切换, 画布尺寸需要按当前
       // 容器实际尺寸重算; 调用方把 view 等显隐依赖传入 deps 以触发本 effect。
       instRef.current.resize()
+    } else {
+      // 数据空窗期(切换时间范围后新查询尚未返回 / 该范围无数据):
+      // 不清空会残留上一范围的画布, 表现为"切了范围但图表没变"。
+      instRef.current.clear()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [option, ...deps])
@@ -157,22 +161,28 @@ export function Regime() {
 
   const days = resolveDays(range, coverage.data)
   const histRange = resolveHistoryRange(range, coverage.data)
+  // "全部"模式依赖 coverage 提供实际日期范围; coverage 未就绪时若直接请求,
+  // start/end 为 undefined → 后端退化成默认 limit=120, 用户会看到"全部"只给 120 天。
+  const rangeReady = range !== 'all' || !!coverage.data
 
   // queryKey 用 range 的完整三元组区分: limit / start+end(全部) / custom天数
   const history = useQuery({
     queryKey: ['regime-history', range] as const,
     queryFn: () => api.regimeHistory(histRange.start, histRange.end, histRange.limit),
+    enabled: rangeReady,
     staleTime: 5 * 60 * 1000,
   })
   const states = useQuery({
     queryKey: QK.regimeStates(days),
     queryFn: () => api.regimeStates(days),
+    enabled: rangeReady,
     staleTime: 5 * 60 * 1000,
   })
   // 情绪周期阶段段 + 主线排行(与 history 同一时间范围)
   const phases = useQuery({
-    queryKey: QK.regimePhases(histRange.start, histRange.end),
-    queryFn: () => api.regimePhases(histRange.start, histRange.end),
+    queryKey: QK.regimePhases(histRange.start, histRange.end, histRange.limit),
+    queryFn: () => api.regimePhases(histRange.start, histRange.end, histRange.limit),
+    enabled: rangeReady,
     staleTime: 5 * 60 * 1000,
   })
   const [mainlineKind, setMainlineKind] = useState<'concept' | 'industry'>('concept')
@@ -181,8 +191,9 @@ export function Regime() {
   const [selDate, setSelDate] = useState<string | null>(null)
   useEffect(() => { setSelDate(null) }, [histRange.start, histRange.end])
   const mainline = useQuery({
-    queryKey: QK.regimeMainline(mainlineKind, histRange.start, histRange.end),
-    queryFn: () => api.regimeMainline(histRange.start, histRange.end, 10, mainlineKind),
+    queryKey: QK.regimeMainline(mainlineKind, histRange.start, histRange.end, histRange.limit),
+    queryFn: () => api.regimeMainline(histRange.start, histRange.end, 10, mainlineKind, histRange.limit),
+    enabled: rangeReady,
     staleTime: 5 * 60 * 1000,
   })
   const [recomputing, setRecomputing] = useState(false)

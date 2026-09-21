@@ -117,8 +117,10 @@ export const QK = {
   regimeLatest:         ['regime-latest'] as const,
   regimeStates:         (days: number) => ['regime-states', days] as const,
   regimeCoverage:       ['regime-coverage'] as const,
-  regimePhases:         (start?: string, end?: string) => ['regime-phases', start ?? '', end ?? ''] as const,
-  regimeMainline:       (kind: string, start?: string, end?: string) => ['regime-mainline', kind, start ?? '', end ?? ''] as const,
+  // limit: 与 history 一致的"最近 N 个交易日"语义, 必须进 key, 否则自定义天数
+  // 只会改主图表、下方段落表与主线排行仍停在旧范围。
+  regimePhases:         (start?: string, end?: string, limit?: number) => ['regime-phases', start ?? '', end ?? '', limit ?? 0] as const,
+  regimeMainline:       (kind: string, start?: string, end?: string, limit?: number) => ['regime-mainline', kind, start ?? '', end ?? '', limit ?? 0] as const,
   // 板块切换 (盘中轮动, 全量分钟聚合) — 30s 前端轮询刷新; seriesKey = 自定义展示板块清单,
   // filterKey = 自动活跃榜行数与排除名单 (会改变结果的参数必须进查询键)
   sectorRotation:       (kind: string, flow?: string, bucket?: number, seriesKey?: string, filterKey?: string) => ['sector-rotation', kind, flow ?? '', bucket ?? 5, seriesKey ?? '', filterKey ?? ''] as const,

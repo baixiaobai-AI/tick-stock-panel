@@ -184,11 +184,15 @@ def regime_phases(
     request: Request,
     start: date | None = None,
     end: date | None = None,
+    limit: int | None = Query(None, ge=1, le=1000),
 ):
     """情绪周期阶段段列表: 连续同阶段合段, 附段内均值指标与主导主线。
 
     直接回答「什么阶段走什么主升」: 主升/高潮段的主导主线即该段行情主线。
     主线按段内进入当日 top5 的天数与累计分排序, 取前 3。
+
+    limit: 只传 limit(不传 start/end)时按"最近 N 个交易日"截断, 与
+    /history 的语义一致 — 前端时间范围选择器处的 UI 才能与实际数据统一。
     """
     from app.services.market_mainline import load_mainline_history
     from app.services.market_phase import PHASE_LABELS
@@ -201,6 +205,8 @@ def regime_phases(
         df = df.filter(pl_col_date(df, ">=", start))
     if end:
         df = df.filter(pl_col_date(df, "<=", end))
+    if start is None and end is None and limit:
+        df = df.sort("date", descending=True).head(limit)
     df = df.sort("date")
     if df.is_empty():
         return {"segments": [], "total": 0}
@@ -318,10 +324,12 @@ def regime_mainline(
     end: date | None = None,
     top: Annotated[int, Query(ge=1, le=30)] = 10,
     kind: Annotated[str, Query(pattern="^(concept|industry)$")] = "concept",
+    limit: int | None = Query(None, ge=1, le=1000),
 ):
     """每日主线排行(截 rank<=top) + 窗口内持续性汇总。
 
     membership_note 说明概念成分口径(当前快照回看历史)。
+    limit: 只传 limit(不传 start/end)时按"最近 N 个交易日"截断, 与 /history 语义一致。
     """
     from app.services.market_mainline import MEMBERSHIP_NOTE, load_mainline_history
 
@@ -338,6 +346,11 @@ def regime_mainline(
         df = df.filter(pl_col_date(df, ">=", start))
     if end:
         df = df.filter(pl_col_date(df, "<=", end))
+    if start is None and end is None and limit:
+        recent_dates = (
+            df.select("date").unique().sort("date", descending=True).head(limit)
+        )
+        df = df.join(recent_dates, on="date", how="semi")
     df = df.sort(["date", "rank"])
     rows_df = df.filter(pl.col("rank") <= top)
     leaders = (

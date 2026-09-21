@@ -2670,17 +2670,19 @@ export const api = {
     // 补算需扫 enriched 全市场数据, 大区间耗时超过默认超时, 放宽到 5 分钟
     return request<{ ok: boolean; computed: number; phase_days?: number; mainline_rows?: number }>(`/api/regime/recompute${qs ? `?${qs}` : ''}`, { method: 'POST', timeoutMs: 300_000 })
   },
-  regimePhases: (start?: string, end?: string) => {
+  regimePhases: (start?: string, end?: string, limit?: number) => {
     const params = new URLSearchParams()
     if (start) params.set('start', start)
     if (end) params.set('end', end)
+    if (limit) params.set('limit', String(limit))
     const qs = params.toString()
     return request<PhaseSegments>(`/api/regime/phases${qs ? `?${qs}` : ''}`)
   },
-  regimeMainline: (start?: string, end?: string, top = 10, kind: 'concept' | 'industry' = 'concept') => {
+  regimeMainline: (start?: string, end?: string, top = 10, kind: 'concept' | 'industry' = 'concept', limit?: number) => {
     const params = new URLSearchParams({ top: String(top), kind })
     if (start) params.set('start', start)
     if (end) params.set('end', end)
+    if (limit) params.set('limit', String(limit))
     return request<MainlineResult>(`/api/regime/mainline?${params.toString()}`)
   },
   regimeMainlineRecompute: () =>
