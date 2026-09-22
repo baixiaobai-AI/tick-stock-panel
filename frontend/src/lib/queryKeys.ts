@@ -121,6 +121,8 @@ export const QK = {
   // 只会改主图表、下方段落表与主线排行仍停在旧范围。
   regimePhases:         (start?: string, end?: string, limit?: number) => ['regime-phases', start ?? '', end ?? '', limit ?? 0] as const,
   regimeMainline:       (kind: string, start?: string, end?: string, limit?: number) => ['regime-mainline', kind, start ?? '', end ?? '', limit ?? 0] as const,
+  // 砸盘指数(ZPZS): 窗口参数必须进 key, 否则切时间范围时该图不跟随
+  regimeSmash:          (start?: string, end?: string, limit?: number, divisor?: number, multiplier?: number) => ['regime-smash', start ?? '', end ?? '', limit ?? 0, divisor ?? '', multiplier ?? ''] as const,
   // 板块切换 (盘中轮动, 全量分钟聚合) — 30s 前端轮询刷新; seriesKey = 自定义展示板块清单,
   // filterKey = 自动活跃榜行数与排除名单 (会改变结果的参数必须进查询键)
   sectorRotation:       (kind: string, flow?: string, bucket?: number, seriesKey?: string, filterKey?: string) => ['sector-rotation', kind, flow ?? '', bucket ?? 5, seriesKey ?? '', filterKey ?? ''] as const,

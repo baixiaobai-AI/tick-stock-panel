@@ -41,6 +41,11 @@ const IGNORE = [
   /(^|\/)\.ruff_cache\//, /(^|\/)\.uv\//, /(^|\/)\.venv\//, /(^|\/)venv\//,
   /(^|\/)\.pnpm-store\//, /(^|\/)\.vite\//,
   /\.pyc$/, /\.pyo$/, /\.tsbuildinfo$/,
+  // ↓ .gitignore 里已忽略 *.log, 但本列表原本没跟上, 导致本地构建日志(tc/pt/vt.log)
+  //   被推上远端。补这几条, 免得每次跑构建都往仓库里塞垃圾。
+  /\.log$/,
+  // vite 解析配置时落的临时文件, 每次 build 都会新建一个带时间戳的副本
+  /vite\.config\.ts\.timestamp-\d+-[a-f0-9]+\.mjs$/,
 ]
 
 function parseArgs(argv) {

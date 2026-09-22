@@ -598,6 +598,45 @@ export interface RegimeCoverage {
   latest_date: string | null
 }
 
+// ── 砸盘指数 (ZPZS) ──
+// ZPZS = SUM(各连板梯队晋级率)/4*10, 4 档 = 昨日 1板/2板/3板/4板以上。
+// 与 regime_history 相互独立: 后端直接读 enriched 日线算, 不需要重算 regime。
+export interface SmashRow {
+  date: string
+  /** 砸盘指数(0~10) */
+  zpzs: number
+  promo_1to2: number
+  promo_2to3: number
+  promo_3to4: number
+  promo_4up: number
+  promo_1to2_pool: number
+  promo_2to3_pool: number
+  promo_3to4_pool: number
+  promo_4up_pool: number
+  promo_1to2_ok: number
+  promo_2to3_ok: number
+  promo_3to4_ok: number
+  promo_4up_ok: number
+}
+
+export interface SmashThresholds {
+  /** 危险线 DL */
+  dl: number
+  /** 试错线 SL */
+  sl: number
+  /** ZPZS 公式除数(默认 4 = 4 档求均值) */
+  divisor: number
+  /** ZPZS 公式乘数(默认 10 = 放大到可读区间) */
+  multiplier: number
+}
+
+export interface RegimeSmash {
+  rows: SmashRow[]
+  total: number
+  rungs: { key: string; label: string }[]
+  config: SmashThresholds
+}
+
 // ── 市场阶段(情绪周期) 与 主线 ──
 export type MarketPhase = 'ice' | 'ignite' | 'rally' | 'climax' | 'ebb' | 'repair'
 
@@ -2662,6 +2701,23 @@ export const api = {
   regimeLatest: () => request<{ row: RegimeRow | null }>('/api/regime/latest'),
   regimeStates: (days = 60) => request<RegimeStates>(`/api/regime/states?days=${days}`),
   regimeCoverage: () => request<RegimeCoverage>('/api/regime/coverage'),
+  /** 砸盘指数(ZPZS)时序 + 配置。divisor/multiplier 透传进公式(图表左上角可调)。 */
+  regimeSmash: (start?: string, end?: string, limit?: number, divisor?: number, multiplier?: number) => {
+    const params = new URLSearchParams()
+    if (start) params.set('start', start)
+    if (end) params.set('end', end)
+    if (limit) params.set('limit', String(limit))
+    if (divisor != null) params.set('divisor', String(divisor))
+    if (multiplier != null) params.set('multiplier', String(multiplier))
+    const qs = params.toString()
+    return request<RegimeSmash>(`/api/regime/smash${qs ? `?${qs}` : ''}`)
+  },
+  /** 保存砸盘指数配置(危险线/试错线 + 公式除数/乘数, 部分更新)。 */
+  setSmashThresholds: (dl?: number, sl?: number, divisor?: number, multiplier?: number) =>
+    request<SmashThresholds>('/api/regime/smash-config', {
+      method: 'PUT',
+      body: JSON.stringify({ dl, sl, divisor, multiplier }),
+    }),
   regimeRecompute: (start?: string, end?: string) => {
     const params = new URLSearchParams()
     if (start) params.set('start', start)

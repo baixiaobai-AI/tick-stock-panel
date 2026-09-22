@@ -1,7 +1,7 @@
 ﻿# TSP 桌面版 — 续接说明（给 AI 助手看）
 
 > 换电脑 / 换 AI 会话时，把本文档贴给 AI，或直接让它 clone 本仓库后读 `HANDOFF.md`，即可无缝续上。
-> 最后更新：2026-09-16
+> 最后更新：2026-09-22
 
 ---
 
@@ -36,6 +36,12 @@
    加了 `push: branches: [main]` 自动触发；并在 PyInstaller 之前安装 akshare/tushare 依赖，否则 exe 缺库启动即崩。
 5. **补 `tiers.yaml`**（项目根）— 无 Key 免费模式可正常启动并拉历史日K。
 6. **v0.1.0 构建成功**（GitHub Actions，约 9 分钟）。旧文档列的 4 条"待验证风险"（polars 原生库、Inno Setup、uv sync 兼容性、插件依赖收集）**真机全过**。
+7. **砸盘指数（ZPZS）双轴图表**（2026-09-22）
+   - 口径：`ZPZS = Σ(各连板梯队晋级率)/4×10`，梯队=昨1板/2板/3板/4板以上，空梯队记 0（分母固定 4，区间 [0,10]）。
+   - 后端 `backend/app/services/smash_index.py` 直接读 `kline_daily_enriched` 算分档晋级率，**不依赖 regime_history**（老数据也能出图，无需重算）。
+   - 接口 `GET /api/regime/smash`（时序+4档明细+rungs+config）、`PUT /api/regime/smash-config`（DL/SL 持久化到 preferences.json）。
+   - 前端 `frontend/src/pages/Regime.tsx` 双轴图：左轴 ZPZS·ZGLB·CJJE，右轴 DPZS；DL(黄虚线=8)/SL(灰虚线=1.8) 右上角可改并写回后端。
+   - 8 个后端单测 + 4 个前端回归测试（含"改 DL/SL 真的写回后端"断言）全绿。
 
 ---
 
@@ -60,11 +66,18 @@
 
 **可行方案**：全程用 GitHub Git Data API（走 `api.github.com`），仓库里已备好现成脚本：
 
-- `tools/gh_update.ps1` —— **日常改代码就用这个**（增量同步，只上传变化的文件，约 10 秒）
+- `tools/gh_push.mjs` —— **当前首选**（Node，无 BOM/GBK 坑，增量同步只上传变化的文件）
+- `tools/gh_update.ps1` —— 旧版 PowerShell 推送（增量同步，约 10 秒；注意 5.1 的 BOM 坑）
 - `tools/gh_tree.ps1` —— 全量建树+提交（首次初始化用，日常不必）
 - `tools/gh_upload.ps1` —— 全量建 blob（已过时，仅作参考）
 
-用法：
+`gh_push.mjs` 用法（token 也可用环境变量 `GH_TOKEN` / `GITHUB_TOKEN`）：
+```bash
+node tools/gh_push.mjs \
+  --owner baixiaobai-AI --repo tick-stock-panel \
+  --token <PAT> --root . --message "改动说明"   # 加 --dry-run 可只看差异不上传
+```
+`gh_update.ps1` 用法：
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/gh_update.ps1 `
   -Owner baixiaobai-AI -Repo tick-stock-panel `

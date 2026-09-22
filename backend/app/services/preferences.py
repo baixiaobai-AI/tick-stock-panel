@@ -425,6 +425,61 @@ def set_sentiment_exclude_st(v: bool) -> bool:
     return get_sentiment_exclude_st()
 
 
+def get_smash_thresholds() -> dict:
+    """砸盘指数图的两条参考线阈值 + 公式缩放系数(都可设置)。
+
+    默认 危险线 DL=8 / 试错线 SL=1.8(用户 2026-09-22 给定)。ZPZS 公式:
+        ZPZS = Σ(各连板梯队晋级率) / divisor * multiplier
+    其中 divisor(默认 4, 即"4 档求均值")与 multiplier(默认 10, 即"×10 放大到
+    可读区间")均可在图表左上角调整(用户 2026-09-22 修订)。存 preferences.json
+    (随 data 目录走, 绿色版换机器也带走)。非法值一律回退默认, 不让脏数据把
+    图表画崩。
+    """
+    raw = load().get("smash_thresholds") or {}
+    if not isinstance(raw, dict):
+        raw = {}
+
+    def _num(key: str, default: float) -> float:
+        try:
+            v = float(raw.get(key, default))
+        except (TypeError, ValueError):
+            return default
+        # NaN/inf 会让 markLine 与坐标轴一起崩, 直接回退
+        if v != v or v in (float("inf"), float("-inf")):
+            return default
+        return v
+
+    return {
+        "dl": _num("dl", 8.0),
+        "sl": _num("sl", 1.8),
+        "divisor": _num("divisor", 4.0),
+        "multiplier": _num("multiplier", 10.0),
+    }
+
+
+def set_smash_thresholds(
+    dl: float | None = None,
+    sl: float | None = None,
+    divisor: float | None = None,
+    multiplier: float | None = None,
+) -> dict:
+    """保存砸盘指数配置(部分更新); 返回保存后的完整配置。
+
+    dl/sl = 两条参考线; divisor/multiplier = ZPZS 公式的除数/乘数(图表左上角可调)。
+    """
+    cur = get_smash_thresholds()
+    if dl is not None:
+        cur["dl"] = float(dl)
+    if sl is not None:
+        cur["sl"] = float(sl)
+    if divisor is not None:
+        cur["divisor"] = float(divisor)
+    if multiplier is not None:
+        cur["multiplier"] = float(multiplier)
+    save({"smash_thresholds": cur})
+    return get_smash_thresholds()
+
+
 def get_mainline_filter_config() -> dict:
     """主线过滤配置汇总(供 API 返回与计算读取)。"""
     return {

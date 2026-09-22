@@ -11,8 +11,9 @@ from typing import Annotated, Any
 
 import polars as pl
 from fastapi import APIRouter, Query, Request
+from pydantic import BaseModel
 
-from app.services import regime_builder
+from app.services import preferences, regime_builder, smash_index
 
 router = APIRouter(prefix="/api/regime", tags=["regime"])
 
@@ -127,6 +128,55 @@ def regime_states(
         for r in counts.to_dicts()
     ]
     return {"distribution": distribution, "days": total}
+
+
+class SmashConfigIn(BaseModel):
+    """砸盘指数配置(部分更新, 缺省字段保持不变)。"""
+
+    dl: float | None = None  # 危险线
+    sl: float | None = None  # 试错线
+    divisor: float | None = None  # ZPZS 公式除数(默认 4)
+    multiplier: float | None = None  # ZPZS 公式乘数(默认 10)
+
+
+@router.get("/smash")
+def regime_smash(
+    request: Request,
+    start: date | None = Query(None),
+    end: date | None = Query(None),
+    limit: int = Query(120, ge=1, le=1000),
+    divisor: float | None = Query(None, description="ZPZS 公式除数, 缺省取偏好(默认 4)"),
+    multiplier: float | None = Query(None, description="ZPZS 公式乘数, 缺省取偏好(默认 10)"),
+):
+    """砸盘指数(ZPZS)时序 + 4 档晋级率明细 + 配置。
+
+    ZPZS = SUM(各连板梯队晋级率) / divisor * multiplier (口径见 services.smash_index)。
+    divisor/multiplier 可在图表左上角调整; 不传则用 preferences 里存的值。
+    数据直接读 enriched 日线, 不依赖 regime_history —— 因此未重算过 regime
+    的历史区间同样能出图, 也无需为了这个指标触发全量重算。
+    limit 语义与 /history 一致: 只在未传 start/end 时生效。
+    """
+    cfg = preferences.get_smash_thresholds()
+    dv = divisor if divisor is not None else cfg["divisor"]
+    mp = multiplier if multiplier is not None else cfg["multiplier"]
+    rows = smash_index.get_smash_series(_data_dir(request), start, end, limit, divisor=dv, multiplier=mp)
+    return {
+        "rows": rows,
+        "total": len(rows),
+        "rungs": [
+            {"key": key, "label": smash_index.RUNG_LABELS[key]}
+            for key, _lo, _hi in smash_index.RUNG_DEFS
+        ],
+        "config": cfg,
+    }
+
+
+@router.put("/smash-config")
+def update_smash_config(req: SmashConfigIn):
+    """保存砸盘指数配置(危险线 DL / 试错线 SL / 公式除数 divisor / 乘数 multiplier), 随 preferences.json 持久化。"""
+    return preferences.set_smash_thresholds(
+        dl=req.dl, sl=req.sl, divisor=req.divisor, multiplier=req.multiplier
+    )
 
 
 @router.get("/coverage")

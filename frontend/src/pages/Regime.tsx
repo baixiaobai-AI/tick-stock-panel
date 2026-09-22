@@ -174,6 +174,37 @@ function SectionTitle({ icon: Icon, title, hint }: { icon: typeof Activity; titl
 // ── 卡片容器样式 (Dashboard 同款) ─────────────────────────
 const cardCls = 'rounded-card border border-border bg-surface/80 shadow-[0_1px_2px_hsl(var(--border)/0.4)] backdrop-blur-sm transition-shadow hover:shadow-[0_2px_8px_hsl(var(--border)/0.5)]'
 
+// ── 砸盘指数 (ZPZS) · 情绪周期 tab · 概览卡与「阶段规律」之间 ──────
+// 位置需求: 「阶段规律」及其以下内容整体下移, 在它们上方插入这张图。
+// 宽度/风格: 与「情绪周期时间轴」同处一个列容器 → 天然等宽; 卡片外框与标题
+// 竖条沿用同一套, 观感一致。
+//
+// 口径(后端 services/smash_index.py 为准):
+//   ZPZS 砸盘指数 = SUM(各连板梯队晋级率) / divisor * multiplier
+//                  divisor 默认 4 (=4 档求均值), multiplier 默认 10 (=放大到可读区间),
+//                  二者均可在图表左上角调整并持久化(用户 2026-09-22 修订)
+//   梯队 = 昨1板/2板/3板/4板以上
+//   ZGLB 最高连板数 = 当日最高连板数(regime_history.max_consecutive)
+//   DPZS 大盘指数  = 指数涨跌幅 × 100(index_pct 是小数, ×100 得百分点数)
+//   CJJE/2K        = 全市场成交额(亿元)/2000(total_amount 单位是元)
+//   DL 危险线 / SL 试错线 = 水平参考线, 右上角可改并持久化
+// 双轴: 左轴 ZPZS·ZGLB·CJJE(量级 0~16 同域), 右轴 DPZS(有正负)。
+const SMASH_COLORS = {
+  zpzs: '#10b981',  // 绿 · 砸盘指数(主线)
+  zglb: '#f97316',  // 橙 · 最高连板数
+  dl: '#eab308',    // 黄 · 危险线
+  sl: '#94a3b8',    // 灰 · 试错线
+  dpzs: '#3b82f6',  // 蓝 · 大盘指数
+  cjje: '#14b8a6',  // 青 · 成交金额/2k
+} as const
+
+// 参考线默认值(后端 preferences 可覆盖): 危险线 8 / 试错线 1.8
+const SMASH_DL_DEFAULT = 8
+const SMASH_SL_DEFAULT = 1.8
+// 公式缩放默认值(图表左上角可改): 除数 4 / 乘数 10
+const SMASH_DIVISOR_DEFAULT = 4
+const SMASH_MULTIPLIER_DEFAULT = 10
+
 // ── 主组件 ────────────────────────────────────────────────
 export function Regime() {
   const qc = useQueryClient()
@@ -206,6 +237,92 @@ export function Regime() {
     enabled: rangeReady,
     staleTime: 5 * 60 * 1000,
   })
+  // 参考线/公式缩放: 生效值(画线) + 输入框文本(编辑中) 分离, 避免 "1." 这种
+  // 中间态被 Number() 解析成 1 而立刻抖动。后端配置到达后回填, 但用户一旦手动
+  // 改过就不再覆盖(否则一次后台 refetch 会把用户刚填的值冲掉)。
+  const [dl, setDl] = useState(SMASH_DL_DEFAULT)
+  const [sl, setSl] = useState(SMASH_SL_DEFAULT)
+  const [dlText, setDlText] = useState(String(SMASH_DL_DEFAULT))
+  const [slText, setSlText] = useState(String(SMASH_SL_DEFAULT))
+  const thresholdsEdited = useRef(false)
+  // 公式缩放(除数/乘数): 生效值 + 编辑文本分离, 左上角可调; 规则与 DL/SL 一致
+  const [divisor, setDivisor] = useState(SMASH_DIVISOR_DEFAULT)
+  const [multiplier, setMultiplier] = useState(SMASH_MULTIPLIER_DEFAULT)
+  const [divisorText, setDivisorText] = useState(String(SMASH_DIVISOR_DEFAULT))
+  const [multiplierText, setMultiplierText] = useState(String(SMASH_MULTIPLIER_DEFAULT))
+  const scaleEdited = useRef(false)
+
+  // 砸盘指数(ZPZS): 独立数据源 —— 后端直接读 enriched 日线算分档晋级率, 与
+  // regime_history 无关, 因此未重算过 regime 的历史区间同样能出图。
+  // 窗口与主图完全一致(同用 histRange), 保证两图逐日对齐。
+  const smash = useQuery({
+    queryKey: QK.regimeSmash(histRange.start, histRange.end, histRange.limit, divisor, multiplier),
+    queryFn: () => api.regimeSmash(histRange.start, histRange.end, histRange.limit, divisor, multiplier),
+    enabled: rangeReady,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  // 后端配置到达后回填 DL/SL 与公式缩放; 用户一旦手动改过某一组就不再覆盖该组
+  useEffect(() => {
+    const cfg = smash.data?.config
+    if (!cfg) return
+    // 老版本 preferences.json 只有 dl/sl, divisor/multiplier 缺失(cfg.x 为 undefined)。
+    // 这里不校验就直接 String(cfg.divisor) 会把字面量 "undefined" 灌进输入框,
+    // 下一次提交时 Number("undefined") 非有限 → 缩放被当成非法而丢弃。
+    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+    if (!thresholdsEdited.current) {
+      const d = num(cfg.dl)
+      const s = num(cfg.sl)
+      if (d !== null) { setDl(d); setDlText(String(d)) }
+      if (s !== null) { setSl(s); setSlText(String(s)) }
+    }
+    if (!scaleEdited.current) {
+      const dv = num(cfg.divisor)
+      const mp = num(cfg.multiplier)
+      if (dv !== null) { setDivisor(dv); setDivisorText(String(dv)) }
+      if (mp !== null) { setMultiplier(mp); setMultiplierText(String(mp)) }
+    }
+  }, [smash.data])
+
+  const commitThresholds = useCallback(async () => {
+    const d = Number(dlText)
+    const s = Number(slText)
+    if (!Number.isFinite(d) || !Number.isFinite(s)) {
+      // 非法输入(空串/字母): 回滚到当前生效值, 不发请求
+      setDlText(String(dl))
+      setSlText(String(sl))
+      return
+    }
+    thresholdsEdited.current = true
+    setDl(d)
+    setSl(s)
+    setDlText(String(d))
+    setSlText(String(s))
+
+    // 公式缩放: 除数/乘数必须为正(否则 Σ/divisor*multiplier 会除零或反向),
+    // 非法则回滚到生效值、不提交这部分, 但 DL/SL 照常提交。
+    const dv = Number(divisorText)
+    const mp = Number(multiplierText)
+    let scaleChanged = false
+    if (Number.isFinite(dv) && dv > 0 && Number.isFinite(mp) && mp > 0) {
+      scaleChanged = true
+      scaleEdited.current = true
+      setDivisor(dv)
+      setMultiplier(mp)
+      setDivisorText(String(dv))
+      setMultiplierText(String(mp))
+    } else {
+      setDivisorText(String(divisor))
+      setMultiplierText(String(multiplier))
+    }
+    try {
+      await api.setSmashThresholds(d, s, scaleChanged ? dv : undefined, scaleChanged ? mp : undefined)
+    } catch {
+      // 保存失败不阻断看图: 本次改动仅本页生效, 明确告知而不是静默吞掉
+      toast('参考线保存失败，本次设置仅当前页面生效', 'error')
+    }
+  }, [dlText, slText, dl, sl, divisorText, multiplierText, divisor, multiplier])
+
   // rows 提前到下方查询之前声明: 阶段段/主线排行的时间窗口取自 history 实际返回的
   // 首尾交易日。(直接传 limit 会依赖后端参数版本 — 旧后端不认 limit 就静默返回全量;
   // 且"最近 N 天"的窗口口径容易与上面的图表错位。用 rows 首尾日期既与图表逐日对齐,
@@ -503,6 +620,105 @@ export function Regime() {
   })
 
   // 趋势图: 综合分主线 + 4 子维度曲线(可切换) + 状态背景色带 + 涨停数柱状
+  // ── 砸盘指数: 左轴 ZPZS/ZGLB/CJJE(同量级) + 右轴 DPZS(有正负), 含 DL/SL 参考线 ──
+  // 横轴日期以 rows(history) 为准, smash 数据按 date 映射进来 —— 这样与
+  // 「情绪周期时间轴」逐日对齐, 不会因两次请求的窗口边界差异错开一格。
+  const smashOption = useMemo<echarts.EChartsOption | null>(() => {
+    if (rows.length === 0) return null
+    const dates = rows.map(r => r.date)
+    const byDate = new Map((smash.data?.rows ?? []).map(s => [s.date, s]))
+    const zpzs = dates.map(d => byDate.get(d)?.zpzs ?? null)
+    const zglb = rows.map(r => r.max_consecutive ?? null)
+    const dpzs = rows.map(r => (r.index_pct != null ? Number((r.index_pct * 100).toFixed(2)) : null))
+    // 成交额: 后端 total_amount 单位是"元" → 先换亿元, 再按用户公式 /2000
+    const cjje = rows.map(r =>
+      r.total_amount != null && r.total_amount > 0
+        ? Number((r.total_amount / 1e8 / 2000).toFixed(2))
+        : null,
+    )
+    const flat = (v: number) => dates.map(() => v)
+    const pct = (v: number | null | undefined) =>
+      v == null ? '—' : `${(v * 100).toFixed(0)}%`
+    return {
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'axis', backgroundColor: ct.tooltipBg, borderColor: ct.tooltipBorder,
+        textStyle: { color: ct.tooltipText },
+        axisPointer: { type: 'line', snap: true, lineStyle: { color: ct.grid } },
+        formatter: (params: any) => {
+          const arr = Array.isArray(params) ? params : [params]
+          const date = arr[0]?.axisValue
+          const i = dates.indexOf(date)
+          const r = rows[i]
+          if (!r) return ''
+          const s = byDate.get(date)
+          const line = (label: string, val: ReactNode, color: string) =>
+            `<div style="display:flex;gap:12px;justify-content:space-between;line-height:1.6">
+               <span style="color:${color}">${label}</span><b>${val}</b></div>`
+          return [
+            `<div style="margin-bottom:2px"><b>${date}</b></div>`,
+            line('ZPZS 砸盘指数', s ? s.zpzs.toFixed(2) : '—', SMASH_COLORS.zpzs),
+            // 4 档明细: 分子/分母一起给, 避免"100%"看起来像强势(可能只是 1/1 小样本)
+            s
+              ? `<div style="color:${ct.text};opacity:.75;font-size:10px;line-height:1.5;margin:0 0 2px 4px">
+                   1进2 ${pct(s.promo_1to2)}(${s.promo_1to2_ok}/${s.promo_1to2_pool}) ·
+                   2进3 ${pct(s.promo_2to3)}(${s.promo_2to3_ok}/${s.promo_2to3_pool})<br>
+                   3进4 ${pct(s.promo_3to4)}(${s.promo_3to4_ok}/${s.promo_3to4_pool}) ·
+                   4板以上 ${pct(s.promo_4up)}(${s.promo_4up_ok}/${s.promo_4up_pool})
+                 </div>`
+              : '',
+            line('ZGLB 最高连板数', r.max_consecutive ?? '—', SMASH_COLORS.zglb),
+            line('DPZS 大盘指数', dpzs[i] ?? '—', SMASH_COLORS.dpzs),
+            line('CJJE/2K 成交金额/2k', cjje[i] ?? '—', SMASH_COLORS.cjje),
+          ].join('')
+        },
+      },
+      legend: {
+        data: ['ZPZS 砸盘指数', 'ZGLB 最高连板数', 'DL 危险线', 'SL 试错线', 'DPZS 大盘指数', 'CJJE/2K 成交金额/2k'],
+        textStyle: { color: ct.text, fontSize: 10 }, top: 0, itemWidth: 14, itemHeight: 8,
+      },
+      grid: { left: 46, right: 52, top: 30, bottom: 34 },
+      xAxis: {
+        type: 'category', data: dates, boundaryGap: false,
+        axisLabel: { color: ct.text, fontSize: 10, formatter: (v: string) => v.slice(5) },
+        axisLine: { lineStyle: { color: ct.grid } },
+      },
+      yAxis: [
+        {
+          type: 'value', name: 'ZPZS·ZGLB', position: 'left', min: 0,
+          axisLabel: { color: ct.text, fontSize: 10 }, splitLine: { show: false },
+          nameTextStyle: { color: ct.text, fontSize: 10 },
+        },
+        {
+          type: 'value', name: 'DPZS', position: 'right',
+          axisLabel: { color: ct.text, fontSize: 10 },
+          splitLine: { lineStyle: { color: ct.grid } },
+          nameTextStyle: { color: ct.text, fontSize: 10 },
+        },
+      ],
+      dataZoom: [
+        { type: 'inside', start: Math.max(0, 100 - (60 / days) * 100) },
+        { type: 'slider', bottom: 4, height: 14, borderColor: ct.border, fillerColor: ct.zoomFill, textStyle: { color: ct.text } },
+      ],
+      series: [
+        // 参考线放最底层: 水平贯穿, 不遮数据; symbol none 与虚线让它一眼可辨
+        { name: 'DL 危险线', type: 'line', data: flat(dl), symbol: 'none', silent: true, yAxisIndex: 0,
+          lineStyle: { width: 1.2, color: SMASH_COLORS.dl, type: 'dashed' }, z: 1 },
+        { name: 'SL 试错线', type: 'line', data: flat(sl), symbol: 'none', silent: true, yAxisIndex: 0,
+          lineStyle: { width: 1.2, color: SMASH_COLORS.sl, type: 'dashed' }, z: 1 },
+        { name: 'CJJE/2K 成交金额/2k', type: 'line', data: cjje, symbol: 'none', yAxisIndex: 0,
+          smooth: true, lineStyle: { width: 1.2, color: SMASH_COLORS.cjje, type: 'dotted' }, z: 2 },
+        { name: 'DPZS 大盘指数', type: 'line', data: dpzs, symbol: 'none', yAxisIndex: 1,
+          smooth: true, lineStyle: { width: 1.3, color: SMASH_COLORS.dpzs }, z: 2 },
+        { name: 'ZGLB 最高连板数', type: 'line', data: zglb, symbol: 'none', yAxisIndex: 0,
+          smooth: true, lineStyle: { width: 1.5, color: SMASH_COLORS.zglb }, z: 3 },
+        { name: 'ZPZS 砸盘指数', type: 'line', data: zpzs, symbol: 'none', yAxisIndex: 0,
+          smooth: true, lineStyle: { width: 2, color: SMASH_COLORS.zpzs }, z: 4 },
+      ],
+    }
+  }, [rows, smash.data, dl, sl, days, ct])
+  const smashRef = useEChart(smashOption, [smashOption, view])
+
   const trendOption = useMemo<echarts.EChartsOption | null>(() => {
     if (rows.length === 0) return null
     const dates = rows.map(r => r.date)
@@ -835,6 +1051,77 @@ export function Regime() {
       ) : (
         <div className="rounded-card border border-dashed border-border p-4 text-center text-xs text-muted">
           市场阶段(情绪周期)数据尚未生成 — 点击右上角「重算」即可回填全部历史阶段与主线
+        </div>
+      )}
+
+      {/* ── 砸盘指数 (概览卡 ↓ / 阶段规律 ↑, 与情绪周期时间轴等宽同风格) ──
+          公式缩放 divisor/multiplier 在左上角设置、参考线 DL/SL 在右上角设置,
+          提交后都写回后端 preferences.json — 该文件在 data 目录下, 绿色版整个
+          目录拷走时设置也跟着走。 */}
+      {hasPhaseData && (
+        <div className={cn(cardCls, 'p-3')}>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+            <span className="h-3 w-0.5 rounded-full bg-gradient-to-b from-accent to-accent/30" />
+            <Gauge className="h-3.5 w-3.5 text-accent" />
+            <h2 className="text-xs font-semibold text-foreground">砸盘指数</h2>
+            <span className="text-[10px] text-muted">
+              ZPZS = Σ晋级率 ÷ {divisor} × {multiplier}
+              {smash.data && smash.data.total === 0 && (
+                <span className="ml-2 text-amber-500">未取到 ZPZS（enriched 日线缺失）</span>
+              )}
+            </span>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-1.5 text-[10px] text-muted">
+                除数 ÷
+                <input
+                  type="number" step="0.1" min="0.1" inputMode="decimal" aria-label="公式除数"
+                  value={divisorText}
+                  onChange={e => setDivisorText(e.target.value)}
+                  onBlur={commitThresholds}
+                  onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                  className="w-12 rounded border border-border bg-surface px-1.5 py-0.5 text-right font-mono text-[10px] text-foreground outline-none focus:border-accent"
+                />
+              </label>
+              <label className="flex items-center gap-1.5 text-[10px] text-muted">
+                倍数 ×
+                <input
+                  type="number" step="0.1" min="0.1" inputMode="decimal" aria-label="公式倍数"
+                  value={multiplierText}
+                  onChange={e => setMultiplierText(e.target.value)}
+                  onBlur={commitThresholds}
+                  onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                  className="w-12 rounded border border-border bg-surface px-1.5 py-0.5 text-right font-mono text-[10px] text-foreground outline-none focus:border-accent"
+                />
+              </label>
+            </div>
+            <div className="ml-auto flex items-center gap-3">
+              <label className="flex items-center gap-1.5 text-[10px] text-muted">
+                <span className="inline-block h-2 w-2 rounded-sm" style={{ background: SMASH_COLORS.dl }} />
+                DL 危险线
+                <input
+                  type="number" step="0.1" inputMode="decimal" aria-label="危险线 DL"
+                  value={dlText}
+                  onChange={e => setDlText(e.target.value)}
+                  onBlur={commitThresholds}
+                  onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                  className="w-14 rounded border border-border bg-surface px-1.5 py-0.5 text-right font-mono text-[10px] text-foreground outline-none focus:border-accent"
+                />
+              </label>
+              <label className="flex items-center gap-1.5 text-[10px] text-muted">
+                <span className="inline-block h-2 w-2 rounded-sm" style={{ background: SMASH_COLORS.sl }} />
+                SL 试错线
+                <input
+                  type="number" step="0.1" inputMode="decimal" aria-label="试错线 SL"
+                  value={slText}
+                  onChange={e => setSlText(e.target.value)}
+                  onBlur={commitThresholds}
+                  onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                  className="w-14 rounded border border-border bg-surface px-1.5 py-0.5 text-right font-mono text-[10px] text-foreground outline-none focus:border-accent"
+                />
+              </label>
+            </div>
+          </div>
+          <div ref={smashRef} className="mt-2 h-[280px]" />
         </div>
       )}
 
